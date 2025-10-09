@@ -4,5 +4,5 @@ source esp-idf-helper $ESP_VERSION || exit 1 2>/dev/null
 
 set -euo pipefail
 
-# Build using the OTA-only target (no NVS generation needed for OTA)
-exec idf.py build-ota
+# Build only the app (no NVS generation needed for OTA)
+exec idf.py app
