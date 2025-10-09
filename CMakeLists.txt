@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.5)
+
+# set(EXTRA_COMPONENT_DIRS "")
+
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(tapestry-node)
+
+# NVS partition generation
+nvs_create_partition_image(nvs ${CMAKE_CURRENT_SOURCE_DIR}/nvs_config.csv FLASH_IN_PROJECT)

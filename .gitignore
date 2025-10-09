@@ -1,0 +1,6 @@
+/build/
+/.claude/
+nvs_config.csv
+nvs.bin
+sdkconfig
+sdkconfig.old
