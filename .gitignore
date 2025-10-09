@@ -4,3 +4,4 @@ nvs_config.csv
 nvs.bin
 sdkconfig
 sdkconfig.old
+/managed_components/
