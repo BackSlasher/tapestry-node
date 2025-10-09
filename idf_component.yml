@@ -1,7 +1,0 @@
-dependencies:
-  idf:
-    version: ">=5.0.0"
-  # Define epdiy dependency from Git repository
-  epdiy:
-    git: https://github.com/vroland/epdiy
-    path: .

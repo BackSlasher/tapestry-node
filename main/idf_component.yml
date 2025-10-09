@@ -1,0 +1,7 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  epdiy:
+    git: https://github.com/vroland/epdiy
+    version: c61e9e923ce2418150d54f88cea5d196cdc40c54
