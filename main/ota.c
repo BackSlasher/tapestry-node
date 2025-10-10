@@ -16,7 +16,7 @@ static void ota_finalize_task(void* param) {
 
     ESP_LOGI(TAG, "Finalizing OTA update...");
 
-    // Set new partition as boot partition
+    // Set new partition as boot partition (pending validation)
     esp_err_t err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
@@ -24,7 +24,9 @@ static void ota_finalize_task(void* param) {
         return;
     }
 
-    ESP_LOGI(TAG, "OTA update successful! Rebooting in 2 seconds...");
+    ESP_LOGW(TAG, "OTA update staged! New firmware will be validated on next boot.");
+    ESP_LOGW(TAG, "If validation fails, device will automatically rollback.");
+    ESP_LOGI(TAG, "Rebooting in 2 seconds...");
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     esp_restart();
 }
@@ -182,6 +184,32 @@ esp_err_t http_ota_info(httpd_req_t* req) {
     // Get next update partition
     const esp_partition_t* update_partition = esp_ota_get_next_update_partition(NULL);
 
+    // Check OTA state
+    esp_ota_img_states_t ota_state;
+    const char* ota_state_str = "unknown";
+    if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+        switch (ota_state) {
+            case ESP_OTA_IMG_NEW:
+                ota_state_str = "pending_validation";
+                break;
+            case ESP_OTA_IMG_PENDING_VERIFY:
+                ota_state_str = "pending_verification";
+                break;
+            case ESP_OTA_IMG_VALID:
+                ota_state_str = "validated";
+                break;
+            case ESP_OTA_IMG_INVALID:
+                ota_state_str = "invalid";
+                break;
+            case ESP_OTA_IMG_ABORTED:
+                ota_state_str = "aborted";
+                break;
+            default:
+                ota_state_str = "undefined";
+                break;
+        }
+    }
+
     // Convert SHA256 to hex string
     char sha256_hex[33] = {0}; // 32 hex chars + null terminator
     for (int i = 0; i < 16; i++) {
@@ -189,7 +217,7 @@ esp_err_t http_ota_info(httpd_req_t* req) {
     }
 
     // Build JSON response
-    char response[512];
+    char response[768];
     snprintf(response, sizeof(response),
         "{"
         "\"current_version\":\"%s\","
@@ -199,6 +227,8 @@ esp_err_t http_ota_info(httpd_req_t* req) {
         "\"idf_version\":\"%s\","
         "\"running_partition\":\"%s\","
         "\"next_partition\":\"%s\","
+        "\"ota_state\":\"%s\","
+        "\"rollback_enabled\":%s,"
         "\"app_elf_sha256\":\"%s\""
         "}",
         app_desc->version,
@@ -208,6 +238,8 @@ esp_err_t http_ota_info(httpd_req_t* req) {
         app_desc->idf_ver,
         running_partition ? running_partition->label : "unknown",
         update_partition ? update_partition->label : "none",
+        ota_state_str,
+        (ota_state == ESP_OTA_IMG_NEW || ota_state == ESP_OTA_IMG_PENDING_VERIFY) ? "true" : "false",
         sha256_hex
     );
 

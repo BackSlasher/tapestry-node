@@ -5,6 +5,8 @@
 #include "nvs_settings.h"
 #include "ota.h"
 #include "cJSON.h"
+#include "esp_ota_ops.h"
+#include "esp_log.h"
 
 static settings_t g_settings;
 
@@ -271,11 +273,39 @@ void register_paths(httpd_handle_t server) {
 }
 
 void app_main(void) {
+    static const char* TAG = "MAIN";
+
     settings_load(&g_settings);
 
     httpd_handle_t server = get_server(&g_settings);
     if (server != NULL) {
         register_paths(server);
+
+        // Validate OTA update after successful network and HTTP server startup
+        const esp_partition_t* running_partition = esp_ota_get_running_partition();
+        esp_ota_img_states_t ota_state;
+
+        if (esp_ota_get_state_partition(running_partition, &ota_state) == ESP_OK) {
+            if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+                ESP_LOGI(TAG, "First boot after OTA update - validating firmware...");
+                ESP_LOGI(TAG, "✓ WiFi connected successfully");
+                ESP_LOGI(TAG, "✓ HTTP server started successfully");
+
+                // Mark the new firmware as valid
+                esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "✓ OTA validation successful - rollback cancelled");
+                } else {
+                    ESP_LOGE(TAG, "✗ Failed to validate OTA update: %s", esp_err_to_name(err));
+                }
+            } else if (ota_state == ESP_OTA_IMG_NEW) {
+                ESP_LOGW(TAG, "Running new firmware - validation pending");
+            } else if (ota_state == ESP_OTA_IMG_VALID) {
+                ESP_LOGI(TAG, "Running validated firmware");
+            }
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to start server - OTA validation skipped");
     }
 
     const EpdDisplay_t* display = get_display_from_model(g_settings.screen_model);
