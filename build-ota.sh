@@ -5,5 +5,7 @@ source esp-idf-helper $ESP_VERSION || exit 1
 set -euo pipefail
 
 # rebuild config file
-! test -f sdkconfig || rm sdkconfig
+if [ -f sdkconfig ]; then
+    rm sdkconfig
+fi
 idf.py app

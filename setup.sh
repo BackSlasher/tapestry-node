@@ -49,7 +49,9 @@ screen_model,data,string,$SCREEN_MODEL
 EOF
 
 # rebuild config file
-! test -f sdkconfig || rm sdkconfig
+if [ -f sdkconfig ]; then
+    rm sdkconfig
+fi
 
 # Build the project (this will now generate NVS partition automatically)
 echo "Building project with NVS generation..."
