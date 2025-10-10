@@ -48,11 +48,6 @@ wifi_password,data,string,$WIFI_PASSWORD
 screen_model,data,string,$SCREEN_MODEL
 EOF
 
-# rebuild config file
-if [ -f sdkconfig ]; then
-    rm sdkconfig
-fi
-
 # Build the project (this will now generate NVS partition automatically)
 echo "Building project with NVS generation..."
 idf.py build
