@@ -10,6 +10,18 @@
 
 static settings_t g_settings;
 
+// Preloaded image buffer for synchronized display
+typedef struct {
+    uint8_t* data;
+    int x;
+    int y;
+    int width;
+    int height;
+    int clear;
+} preloaded_image_t;
+
+static preloaded_image_t g_preloaded_image = {0};
+
 static const EpdDisplay_t* get_display_from_model(const char* model) {
     if (strcmp(model, "ED060XC3") == 0) {
         return &ED060XC3;
@@ -43,6 +55,118 @@ esp_err_t http_clear(httpd_req_t* req) {
     ESP_LOGI(__FUNCTION__, "Clear\n");
     n_epd_clear();
     const char* response = "Cleared\n";
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_status(req, "200");
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+esp_err_t http_load(httpd_req_t* req) {
+    // Load image into preload buffer without displaying
+    int x, y, width, height, clear;
+    char header[20];
+    memset(header, 0, 20);
+    
+    if (httpd_req_get_hdr_value_str(req, "clear", header, 20) == ESP_OK) {
+        sscanf(header, "%d", &clear);
+    } else {
+        clear = 0;
+    }
+    if (httpd_req_get_hdr_value_str(req, "x", header, 20) == ESP_OK) {
+        sscanf(header, "%d", &x);
+    } else {
+        x = 0;
+    }
+    if (httpd_req_get_hdr_value_str(req, "y", header, 20) == ESP_OK) {
+        sscanf(header, "%d", &y);
+    } else {
+        y = 0;
+    }
+    if (httpd_req_get_hdr_value_str(req, "width", header, 20) == ESP_OK) {
+        sscanf(header, "%d", &width);
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing header width");
+        return ESP_OK;
+    }
+    if (httpd_req_get_hdr_value_str(req, "height", header, 20) == ESP_OK) {
+        sscanf(header, "%d", &height);
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing header height");
+        return ESP_OK;
+    }
+
+    // Free any previously preloaded image
+    if (g_preloaded_image.data != NULL) {
+        heap_caps_free(g_preloaded_image.data);
+        g_preloaded_image.data = NULL;
+    }
+
+    // Allocate buffer for preloaded image
+    int req_size = req->content_len;
+    g_preloaded_image.data = (uint8_t*)heap_caps_malloc(req_size, MALLOC_CAP_SPIRAM);
+    if (g_preloaded_image.data == NULL) {
+        char msg[50];
+        sprintf(msg, "Failed to allocate %d bytes\n", req_size);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, msg);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Read image data into buffer
+    int current_pos = 0;
+    int amount_received;
+    while ((amount_received = httpd_req_recv(req, (char*)(g_preloaded_image.data + current_pos), req_size)) > 0) {
+        ESP_LOGI(__FUNCTION__, "Read %d bytes\n", amount_received);
+        current_pos += amount_received;
+    }
+    if (amount_received < 0) {
+        heap_caps_free(g_preloaded_image.data);
+        g_preloaded_image.data = NULL;
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read bytes");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Store metadata
+    g_preloaded_image.x = x;
+    g_preloaded_image.y = y;
+    g_preloaded_image.width = width;
+    g_preloaded_image.height = height;
+    g_preloaded_image.clear = clear;
+
+    ESP_LOGI(__FUNCTION__, "Loaded %d bytes (x=%d, y=%d, w=%d, h=%d)\n", 
+             current_pos, x, y, width, height);
+
+    char response[100];
+    sprintf(response, "Loaded: x %d, y %d, width %d, height %d, bytes %d\n", 
+            x, y, width, height, req_size);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_status(req, "200");
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+esp_err_t http_display(httpd_req_t* req) {
+    // Display the preloaded image
+    if (g_preloaded_image.data == NULL) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No image preloaded");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(__FUNCTION__, "Displaying preloaded image\n");
+
+    if (g_preloaded_image.clear) {
+        n_epd_clear();
+    }
+    n_epd_draw(g_preloaded_image.data, 
+               g_preloaded_image.x, 
+               g_preloaded_image.y, 
+               g_preloaded_image.width, 
+               g_preloaded_image.height);
+
+    // Free the buffer after displaying
+    heap_caps_free(g_preloaded_image.data);
+    g_preloaded_image.data = NULL;
+
+    const char* response = "Displayed\n";
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_status(req, "200");
     httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
@@ -248,6 +372,16 @@ void register_paths(httpd_handle_t server) {
     {
         httpd_uri_t uri
             = { .uri = "/draw", .method = HTTP_POST, .handler = http_draw, .user_ctx = NULL };
+        httpd_register_uri_handler(server, &uri);
+    }
+    {
+        httpd_uri_t uri
+            = { .uri = "/load", .method = HTTP_POST, .handler = http_load, .user_ctx = NULL };
+        httpd_register_uri_handler(server, &uri);
+    }
+    {
+        httpd_uri_t uri
+            = { .uri = "/display", .method = HTTP_POST, .handler = http_display, .user_ctx = NULL };
         httpd_register_uri_handler(server, &uri);
     }
     {
